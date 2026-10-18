@@ -1,1 +1,123 @@
-<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><title>準備中</title><p>準備中です。</p>
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>パリ旅のしおり</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="パリ旅">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F6F5F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1C1A1E" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{--bg:#F6F5F3;--surface:#FFFFFF;--ink:#2F2A33;--ink-2:#6F6874;--line:#E6E2E5;--accent:#A8667B;--err:#9A4A57;color-scheme:light}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#1C1A1E;--surface:#252227;--ink:#EDE9EF;--ink-2:#ACA4AF;--line:#38333A;--accent:#D6A0B1;--err:#E3A7B4;color-scheme:dark}
+}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 "Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",sans-serif}
+.gate{min-height:100vh;min-height:100dvh;display:grid;place-items:center;box-sizing:border-box;
+  padding:calc(24px + env(safe-area-inset-top,0px)) 20px calc(24px + env(safe-area-inset-bottom,0px))}
+.card{width:100%;max-width:360px;box-sizing:border-box;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:28px 22px;text-align:center}
+.eyebrow{margin:0;color:var(--accent);font-family:"Times New Roman",serif;letter-spacing:.08em;font-size:13px}
+h1{margin:6px 0 20px;font-size:22px;letter-spacing:.04em}
+label{display:block;text-align:left;font-size:13px;color:var(--ink-2);margin-bottom:6px}
+input{width:100%;box-sizing:border-box;font:inherit;font-size:17px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink)}
+input:focus{outline:2px solid var(--accent);outline-offset:1px}
+button{margin-top:14px;width:100%;font:inherit;font-weight:700;font-size:16px;padding:12px;border:0;border-radius:12px;background:var(--accent);color:#fff}
+button:disabled{opacity:.6}
+.msg{min-height:1.6em;margin:12px 0 0;font-size:13px;color:var(--ink-2)}
+.msg.err{color:var(--err)}
+.note{margin:14px 0 0;font-size:12px;line-height:1.7;color:var(--ink-2);text-align:left}
+.loading{margin:0;padding-top:42vh;text-align:center;font-size:13px;color:var(--ink-2)}
+</style>
+</head>
+<body>
+<p class="loading" id="loading">読み込んでいます…</p>
+<main class="gate" id="gate" hidden>
+  <form class="card" id="f">
+    <p class="eyebrow">Paris · 24 — 28 novembre 2026</p>
+    <h1>パリ旅のしおり</h1>
+    <label for="pw">パスワード</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <button id="go">開く</button>
+    <p class="msg" id="msg" role="status"></p>
+    <p class="note">入力は最初の1回だけです。この端末が覚えるので、次からはそのまま開きます。一度開けば、回線がないときも見られます。</p>
+  </form>
+</main>
+<script>
+/* パスワードで中身（payload.bin、AES-GCM）を開いて表示する。鍵はこの端末に覚えておく。
+   開いたページで上書きするので、ここでは名前を外に出さない（ページ側の const とぶつけない）。 */
+(() => {
+  const SALT = "yMr5LwmDBPbB9+Y1VC+NwA==", ITER = 600000, KEY_NAME = "paris-shiori-key";
+  const $ = id => document.getElementById(id);
+  const fromB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const toB64 = buf => { let s = ""; new Uint8Array(buf).forEach(b => s += String.fromCharCode(b)); return btoa(s); };
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+  let payload = null;
+  const getPayload = async () => {
+    if (!payload) {
+      const r = await fetch("payload.bin");
+      if (!r.ok) throw new Error("payload " + r.status);
+      payload = new Uint8Array(await r.arrayBuffer());
+    }
+    return payload;
+  };
+  const open = async key => {
+    const p = await getPayload();
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: p.slice(0, 12) }, key, p.slice(12));
+    return new TextDecoder().decode(plain);
+  };
+  const importRaw = raw => crypto.subtle.importKey("raw", raw, "AES-GCM", true, ["decrypt"]);
+  const derive = async pw => {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", salt: fromB64(SALT), iterations: ITER, hash: "SHA-256" },
+                                   base, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+  };
+  const show = html => { document.open(); document.write(html); document.close(); };
+  const ask = (text, err) => {
+    $("loading").hidden = true;
+    $("gate").hidden = false;
+    $("msg").textContent = text || "";
+    $("msg").classList.toggle("err", !!err);
+  };
+  const NO_NET = "しおりを読み込めませんでした。回線がつながる場所で開き直してください。";
+
+  $("f").addEventListener("submit", async e => {
+    e.preventDefault();
+    $("go").disabled = true;
+    ask("確認しています…");
+    try {
+      const key = await derive($("pw").value);
+      const html = await open(key);
+      try { localStorage.setItem(KEY_NAME, toB64(await crypto.subtle.exportKey("raw", key))); } catch (err) {}
+      show(html);
+    } catch (err) {
+      $("go").disabled = false;
+      ask(payload ? "パスワードが違います。" : NO_NET, true);
+    }
+  });
+
+  (async () => {
+    if (!window.crypto || !crypto.subtle) return ask("このブラウザでは開けません。Safari で https のアドレスを開いてください。", true);
+    let saved = null;
+    try { saved = localStorage.getItem(KEY_NAME); } catch (e) {}
+    if (!saved) return ask();
+    try {
+      show(await open(await importRaw(fromB64(saved))));
+    } catch (e) {
+      if (!payload) return ask(NO_NET, true);
+      try { localStorage.removeItem(KEY_NAME); } catch (err) {}
+      ask("パスワードが変わりました。もう一度入力してください。");
+    }
+  })();
+})();
+</script>
+</body>
+</html>
